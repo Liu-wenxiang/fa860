@@ -1,0 +1,113 @@
+mute:
+  name: Mute channel
+  description: Set mute or unmute for a FA860 output channel.
+  fields:
+    channel:
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 8
+          mode: box
+    mute:
+      required: true
+      selector:
+        boolean: {}
+
+source:
+  name: Set source mask
+  description: Enable or disable line, BLE, and digital sources for a FA860 output channel.
+  fields:
+    channel:
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 8
+          mode: box
+    line:
+      selector:
+        boolean: {}
+    ble:
+      selector:
+        boolean: {}
+    digital:
+      selector:
+        boolean: {}
+
+volume:
+  name: Set volume
+  description: Set FA860 channel volume in dB.
+  fields:
+    channel:
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 8
+          mode: box
+    db:
+      required: true
+      selector:
+        number:
+          min: -60
+          max: 0
+          mode: box
+    mute:
+      selector:
+        boolean: {}
+
+mix_line:
+  name: Set LINE1-LINE8 mixer values
+  description: Set the eight LINE mixer inputs for a FA860 output channel.
+  fields:
+    channel:
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 8
+          mode: box
+    values:
+      required: true
+      example: [100, 0, 100, 0, 0, 0, 0, 0]
+
+mix_tail:
+  name: Set DIGITAL and BT mixer values
+  description: Set DIGITAL_L, DIGITAL_R, BT_L, and BT_R for a FA860 output channel.
+  fields:
+    channel:
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 8
+          mode: box
+    digital_l:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: box
+    digital_r:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: box
+    bt_l:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: box
+    bt_r:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: box

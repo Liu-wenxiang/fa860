@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fa860-control"
+version = "0.1.0"
+description = "Python tooling for reverse engineering and controlling a HiVi FA860 DSP amplifier"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pyserial>=3.5",
+  "hidapi>=0.14",
+]
+
+[project.optional-dependencies]
+ble = ["bleak>=0.22"]
+dev = ["pytest>=8.3"]
+
+[project.scripts]
+fa860ctl = "fa860_control.cli:main"
+fa860-bridge = "fa860_control.home_assistant:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,28 @@
+{
+  "protocol": {
+    "timeout": 1.0,
+    "checksum": "sum8"
+  },
+  "commands": {
+    "get_status": {
+      "request": "AA 55 00 00",
+      "append_checksum": true,
+      "read_size": 16
+    },
+    "set_volume": {
+      "request": "AA 55 02 01 {volume:02X}",
+      "append_checksum": true,
+      "read_size": 8
+    },
+    "set_mute": {
+      "request": "AA 55 02 02 {mute:02X}",
+      "append_checksum": true,
+      "read_size": 8
+    },
+    "recall_preset": {
+      "request": "AA 55 02 03 {preset:02X}",
+      "append_checksum": true,
+      "read_size": 8
+    }
+  }
+}

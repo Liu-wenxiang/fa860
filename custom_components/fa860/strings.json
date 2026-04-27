@@ -1,0 +1,34 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to FA860 bridge",
+        "description": "Enter the FA860 bridge address.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "timeout": "Timeout",
+          "use_ssl": "Use SSL"
+        }
+      },
+      "reconfigure": {
+        "title": "Update FA860 bridge",
+        "description": "Change the FA860 bridge address.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "timeout": "Timeout",
+          "use_ssl": "Use SSL"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the FA860 bridge.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "single_instance_allowed": "Only one FA860 bridge can be configured.",
+      "reconfigure_successful": "FA860 bridge configuration updated successfully."
+    }
+  }
+}

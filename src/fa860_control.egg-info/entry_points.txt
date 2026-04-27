@@ -1,0 +1,3 @@
+[console_scripts]
+fa860-bridge = fa860_control.home_assistant:main
+fa860ctl = fa860_control.cli:main
