@@ -1,0 +1,26 @@
+default:
+  image: python:3.12-slim
+  tags:
+    - docker
+
+stages:
+  - test
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+cache:
+  paths:
+    - .cache/pip
+
+before_script:
+  - apt-get update
+  - apt-get install -y --no-install-recommends libhidapi-dev
+  - python -m pip install --upgrade pip
+  - pip install -e .[dev]
+
+test:
+  stage: test
+  script:
+    - pytest
