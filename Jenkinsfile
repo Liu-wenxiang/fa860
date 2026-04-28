@@ -8,13 +8,25 @@ pipeline {
   environment {
     COMPOSE_FILE = "docker-compose.feiniu.yml"
     SERVICE_NAME = "fa860-bridge"
-    HEALTH_URL = "http://127.0.0.1:9123/health"
+    HEALTH_URL = "http://loverweb.cn:9123/health"
   }
 
   stages {
     stage("Checkout") {
       steps {
         checkout scm
+      }
+    }
+
+    stage("Resolve Commit Info") {
+      steps {
+        script {
+          def commitSubject = sh(script: "git log -1 --pretty=%s", returnStdout: true).trim()
+          def commitSha = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+          def triggerUser = params.GITLAB_USER?.trim()
+
+          currentBuild.description = "${commitSubject}" + (triggerUser ? " by ${triggerUser}" : "")
+        }
       }
     }
 
