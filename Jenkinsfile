@@ -1,3 +1,5 @@
+@Library('ci-shared-library') _
+
 pipeline {
   agent any
 
@@ -65,9 +67,17 @@ pipeline {
   post {
     success {
       echo "FA860 bridge deployed successfully: ${HEALTH_URL}"
+      notifyBarkSuccess(
+        title: 'FA860 Bridge 部署成功',
+        body: "健康检查: ${HEALTH_URL}"
+      )
     }
 
     failure {
+      notifyBarkSuccess(
+        title: 'FA860 Bridge 部署失败',
+        body: "请查看 Jenkins 日志: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+      )
       sh 'docker compose -f "$COMPOSE_FILE" logs --tail=100 "$SERVICE_NAME" || true'
     }
   }
