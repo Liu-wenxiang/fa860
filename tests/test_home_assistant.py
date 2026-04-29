@@ -1,12 +1,23 @@
 import asyncio
+import time
 
-from fa860_control.home_assistant import execute_bridge_command
+from fa860_control.home_assistant import BridgeClientRuntime, execute_bridge_command, execute_bridge_http_command
 from fa860_control.protocol import bytes_to_hex
 
 
 class FakeClient:
     def __init__(self) -> None:
         self.config = type("Config", (), {"commands": {"get_status": object()}})()
+        self.enter_count = 0
+        self.exit_count = 0
+
+    async def __aenter__(self) -> "FakeClient":
+        self.enter_count += 1
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        self.exit_count += 1
+        return None
 
     async def set_channel_mute(self, channel: int, mute: bool, read_size: int = 0) -> bytes:
         return f"mute:{channel}:{int(mute)}:{read_size}".encode("ascii")
@@ -105,3 +116,73 @@ def test_execute_bridge_command_requires_config_for_template_commands() -> None:
         assert str(exc) == "bridge template commands require --config with matching command definitions"
     else:
         raise AssertionError("expected template command config error")
+
+
+def test_execute_bridge_http_command_returns_bad_request_for_validation_errors() -> None:
+    runtime = BridgeClientRuntime(lambda: FakeClient(), idle_disconnect_seconds=20)
+    payload, status = execute_bridge_http_command(runtime, "mix_line", {"channel": 1, "values": [1, 2, 3]})
+    runtime.close()
+
+    assert status == 400
+    assert payload == {"ok": False, "error": "values must contain exactly 8 items"}
+
+
+def test_execute_bridge_http_command_returns_server_error_for_runtime_errors() -> None:
+    class FailingClient(FakeClient):
+        async def set_channel_volume(self, channel: int, db: int, mute: bool = False, read_size: int = 0) -> bytes:
+            raise RuntimeError("device busy")
+
+    runtime = BridgeClientRuntime(lambda: FailingClient(), idle_disconnect_seconds=20)
+    payload, status = execute_bridge_http_command(runtime, "volume", {"channel": 4, "db": -20, "mute": False})
+    runtime.close()
+
+    assert status == 500
+    assert payload == {"ok": False, "error": "device busy"}
+
+
+def test_bridge_client_runtime_reuses_client_until_idle_disconnect() -> None:
+    clients: list[FakeClient] = []
+
+    def factory() -> FakeClient:
+        client = FakeClient()
+        clients.append(client)
+        return client
+
+    runtime = BridgeClientRuntime(factory, idle_disconnect_seconds=0.05)
+
+    payload_1, status_1 = runtime.execute_http_command("mute", {"channel": 2, "mute": True})
+    payload_2, status_2 = runtime.execute_http_command("volume", {"channel": 4, "db": -20, "mute": False})
+
+    assert status_1 == 200
+    assert payload_1["ok"] is True
+    assert status_2 == 200
+    assert payload_2["ok"] is True
+    assert len(clients) == 1
+    assert clients[0].enter_count == 1
+    assert clients[0].exit_count == 0
+
+    time.sleep(0.12)
+
+    assert clients[0].exit_count == 1
+
+
+def test_bridge_client_runtime_serializes_client_reuse_after_idle_disconnect() -> None:
+    clients: list[FakeClient] = []
+
+    def factory() -> FakeClient:
+        client = FakeClient()
+        clients.append(client)
+        return client
+
+    runtime = BridgeClientRuntime(factory, idle_disconnect_seconds=0.05)
+
+    runtime.execute_http_command("mute", {"channel": 2, "mute": True})
+    time.sleep(0.12)
+    runtime.execute_http_command("mute", {"channel": 2, "mute": False})
+    runtime.close()
+
+    assert len(clients) == 2
+    assert clients[0].enter_count == 1
+    assert clients[0].exit_count == 1
+    assert clients[1].enter_count == 1
+    assert clients[1].exit_count == 1

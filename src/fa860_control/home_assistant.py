@@ -5,6 +5,8 @@ import asyncio
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from json import JSONDecodeError
 import json
+import logging
+import threading
 from typing import Any
 
 from .client import FA860Client
@@ -15,6 +17,10 @@ from .transports.hid_transport import HidTransport
 from .transports.mock import MockTransport
 from .transports.serial_transport import SerialTransport
 from .windows_setupapi import resolve_hid_path
+
+
+_LOGGER = logging.getLogger(__name__)
+DEFAULT_IDLE_DISCONNECT_SECONDS = 20.0
 
 
 SUPPORTED_DIRECT_COMMANDS = (
@@ -83,6 +89,77 @@ async def execute_bridge_command(client: FA860Client, name: str, params: dict[st
     return await client.send_command(name, **params)
 
 
+async def _run_bridge_command(client_factory: Any, name: str, params: dict[str, object]) -> dict[str, object]:
+    async with client_factory() as client:
+        raw = await execute_bridge_command(client, name, params)
+    return {"ok": True, "command": name, "response_hex": bytes_to_hex(raw)}
+
+
+class BridgeClientRuntime:
+    def __init__(self, client_factory: Any, idle_disconnect_seconds: float = DEFAULT_IDLE_DISCONNECT_SECONDS) -> None:
+        self._client_factory = client_factory
+        self._idle_disconnect_seconds = idle_disconnect_seconds
+        self._lock = threading.Lock()
+        self._client: FA860Client | None = None
+        self._idle_timer: threading.Timer | None = None
+
+    def execute_http_command(self, name: str, params: dict[str, object]) -> tuple[dict[str, object], int]:
+        with self._lock:
+            self._cancel_idle_timer_locked()
+            try:
+                client = self._ensure_client_locked()
+                raw = asyncio.run(execute_bridge_command(client, name, params))
+            except (KeyError, TypeError, ValueError) as exc:
+                self._schedule_idle_disconnect_locked()
+                return {"ok": False, "error": str(exc)}, 400
+            except Exception as exc:
+                _LOGGER.exception("FA860 bridge command failed: %s", name)
+                self._schedule_idle_disconnect_locked()
+                return {"ok": False, "error": str(exc) or exc.__class__.__name__}, 500
+            self._schedule_idle_disconnect_locked()
+            return {"ok": True, "command": name, "response_hex": bytes_to_hex(raw)}, 200
+
+    def close(self) -> None:
+        with self._lock:
+            self._cancel_idle_timer_locked()
+            self._disconnect_client_locked()
+
+    def _ensure_client_locked(self) -> FA860Client:
+        if self._client is None:
+            client = self._client_factory()
+            asyncio.run(client.__aenter__())
+            self._client = client
+        return self._client
+
+    def _schedule_idle_disconnect_locked(self) -> None:
+        if self._idle_disconnect_seconds <= 0:
+            return
+        self._idle_timer = threading.Timer(self._idle_disconnect_seconds, self._disconnect_due_to_idle)
+        self._idle_timer.daemon = True
+        self._idle_timer.start()
+
+    def _cancel_idle_timer_locked(self) -> None:
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+            self._idle_timer = None
+
+    def _disconnect_due_to_idle(self) -> None:
+        with self._lock:
+            self._idle_timer = None
+            self._disconnect_client_locked()
+
+    def _disconnect_client_locked(self) -> None:
+        if self._client is None:
+            return
+        client = self._client
+        self._client = None
+        asyncio.run(client.__aexit__(None, None, None))
+
+
+def execute_bridge_http_command(runtime: BridgeClientRuntime, name: str, params: dict[str, object]) -> tuple[dict[str, object], int]:
+    return runtime.execute_http_command(name, params)
+
+
 def build_transport(args: argparse.Namespace):
     if args.transport == "serial":
         return SerialTransport(port=args.port, baudrate=args.baudrate, timeout=args.timeout)
@@ -110,6 +187,7 @@ def build_transport(args: argparse.Namespace):
 
 class RequestHandler(BaseHTTPRequestHandler):
     client_factory: Any = None
+    bridge_runtime: BridgeClientRuntime | None = None
 
     def do_GET(self) -> None:
         if self.path == "/health":
@@ -134,17 +212,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8"))
             name = payload["name"]
             params = payload.get("params", {})
-            response = asyncio.run(self._run_command(name, params))
         except (JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=400)
             return
-        self._send_json(response)
-
-    async def _run_command(self, name: str, params: dict[str, object]) -> dict[str, object]:
-        factory = type(self).client_factory
-        async with factory() as client:
-            raw = await execute_bridge_command(client, name, params)
-        return {"ok": True, "command": name, "response_hex": bytes_to_hex(raw)}
+        runtime = type(self).bridge_runtime
+        if runtime is None:
+            self._send_json({"ok": False, "error": "bridge runtime is not configured"}, status=500)
+            return
+        response, status = execute_bridge_http_command(runtime, name, params)
+        self._send_json(response, status=status)
 
     def _send_json(self, payload: dict[str, object], status: int = 200) -> None:
         data = json.dumps(payload).encode("utf-8")
@@ -192,12 +268,15 @@ def main() -> None:
         return FA860Client(build_transport(args), config)
 
     RequestHandler.client_factory = staticmethod(client_factory)
+    bridge_runtime = BridgeClientRuntime(client_factory)
+    RequestHandler.bridge_runtime = bridge_runtime
     server = ThreadingHTTPServer((args.listen_host, args.listen_port), RequestHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        bridge_runtime.close()
         server.server_close()
 
 
