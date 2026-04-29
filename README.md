@@ -1,5 +1,7 @@
 ﻿# FA860 Control
 
+[在线编辑](https://loverweb.cn:8443/?folder=/Code/Lwx/fa860)
+
 这个项目用于控制惠威 FA860，并把已经确认可用的控制能力整理成 Python API、命令行工具和 Home Assistant 可调用的 bridge。
 
 当前已经确认可用的控制范围：
