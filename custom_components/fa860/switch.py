@@ -8,7 +8,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from . import DOMAIN, SIGNAL_STATE_UPDATED, SERVICE_SOURCE, async_send_channel_mute_command, get_channel_state, get_entry_client, publish_state_update
+from . import DOMAIN, SIGNAL_AVAILABILITY_UPDATED, SIGNAL_STATE_UPDATED, SERVICE_SOURCE, async_execute_entry_command, async_send_channel_mute_command, get_channel_state, is_entry_available, publish_state_update
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
@@ -42,9 +42,18 @@ class Fa860ChannelRestoreEntity(RestoreEntity):
     def extra_state_attributes(self) -> dict[str, int]:
         return {"channel": self._channel}
 
+    @property
+    def available(self) -> bool:
+        return is_entry_available(self.hass, self._entry.entry_id)
+
     @callback
     def _handle_state_updated(self, entry_id: str, channel: int) -> None:
         if entry_id == self._entry.entry_id and channel == self._channel:
+            self.async_write_ha_state()
+
+    @callback
+    def _handle_availability_updated(self, entry_id: str) -> None:
+        if entry_id == self._entry.entry_id:
             self.async_write_ha_state()
 
     async def async_added_to_hass(self) -> None:
@@ -53,6 +62,7 @@ class Fa860ChannelRestoreEntity(RestoreEntity):
         if last_state is not None:
             self._apply_restored_state(last_state.state)
         self.async_on_remove(async_dispatcher_connect(self.hass, SIGNAL_STATE_UPDATED, self._handle_state_updated))
+        self.async_on_remove(async_dispatcher_connect(self.hass, SIGNAL_AVAILABILITY_UPDATED, self._handle_availability_updated))
 
     def _apply_restored_state(self, state: str) -> None:
         raise NotImplementedError
@@ -125,8 +135,7 @@ class Fa860SourceSwitch(Fa860ChannelRestoreEntity, SwitchEntity):
             "digital": state.source_digital,
         }
         params[self._source_key] = enabled
-        client = get_entry_client(self.hass, self._entry.entry_id)
-        await client.async_command(SERVICE_SOURCE, params)
+        await async_execute_entry_command(self.hass, self._entry.entry_id, SERVICE_SOURCE, params)
         publish_state_update(self.hass, self._entry.entry_id, SERVICE_SOURCE, params)
 
     def _apply_restored_state(self, state: str) -> None:

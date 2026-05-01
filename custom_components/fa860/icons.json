@@ -1,0 +1,9 @@
+{
+  "services": {
+    "mute": "mdi:volume-off",
+    "source": "mdi:audio-input-rca",
+    "volume": "mdi:volume-high",
+    "mix_line": "mdi:ray-start-arrow",
+    "mix_tail": "mdi:tune-variant"
+  }
+}

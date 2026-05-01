@@ -8,7 +8,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from . import DOMAIN, MIX_LINE_LABELS, MIX_TAIL_LABELS, SIGNAL_STATE_UPDATED, SERVICE_MIX_LINE, SERVICE_MIX_TAIL, SERVICE_VOLUME, get_channel_state, get_entry_client, publish_state_update
+from . import DOMAIN, MIX_LINE_LABELS, MIX_TAIL_LABELS, SIGNAL_AVAILABILITY_UPDATED, SIGNAL_STATE_UPDATED, SERVICE_MIX_LINE, SERVICE_MIX_TAIL, SERVICE_VOLUME, async_execute_entry_command, get_channel_state, is_entry_available, publish_state_update
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
@@ -44,9 +44,18 @@ class Fa860ChannelNumber(RestoreEntity, NumberEntity):
     def extra_state_attributes(self) -> dict[str, int]:
         return {"channel": self._channel}
 
+    @property
+    def available(self) -> bool:
+        return is_entry_available(self.hass, self._entry.entry_id)
+
     @callback
     def _handle_state_updated(self, entry_id: str, channel: int) -> None:
         if entry_id == self._entry.entry_id and channel == self._channel:
+            self.async_write_ha_state()
+
+    @callback
+    def _handle_availability_updated(self, entry_id: str) -> None:
+        if entry_id == self._entry.entry_id:
             self.async_write_ha_state()
 
     async def async_added_to_hass(self) -> None:
@@ -55,6 +64,7 @@ class Fa860ChannelNumber(RestoreEntity, NumberEntity):
         if last_state is not None and last_state.state not in {"unknown", "unavailable"}:
             self._apply_restored_value(float(last_state.state))
         self.async_on_remove(async_dispatcher_connect(self.hass, SIGNAL_STATE_UPDATED, self._handle_state_updated))
+        self.async_on_remove(async_dispatcher_connect(self.hass, SIGNAL_AVAILABILITY_UPDATED, self._handle_availability_updated))
 
     def _apply_restored_value(self, value: float) -> None:
         raise NotImplementedError
@@ -83,8 +93,7 @@ class Fa860VolumeNumber(Fa860ChannelNumber):
             "db": int(round(value)),
             "mute": state.mute,
         }
-        client = get_entry_client(self.hass, self._entry.entry_id)
-        await client.async_command(SERVICE_VOLUME, params)
+        await async_execute_entry_command(self.hass, self._entry.entry_id, SERVICE_VOLUME, params)
         publish_state_update(self.hass, self._entry.entry_id, SERVICE_VOLUME, params)
 
     def _apply_restored_value(self, value: float) -> None:
@@ -122,8 +131,7 @@ class Fa860MixLineNumber(Fa860ChannelNumber):
             "channel": self._channel,
             "values": values,
         }
-        client = get_entry_client(self.hass, self._entry.entry_id)
-        await client.async_command(SERVICE_MIX_LINE, params)
+        await async_execute_entry_command(self.hass, self._entry.entry_id, SERVICE_MIX_LINE, params)
         publish_state_update(self.hass, self._entry.entry_id, SERVICE_MIX_LINE, params)
 
     def _apply_restored_value(self, value: float) -> None:
@@ -163,8 +171,7 @@ class Fa860MixTailNumber(Fa860ChannelNumber):
             "channel": self._channel,
             **values,
         }
-        client = get_entry_client(self.hass, self._entry.entry_id)
-        await client.async_command(SERVICE_MIX_TAIL, params)
+        await async_execute_entry_command(self.hass, self._entry.entry_id, SERVICE_MIX_TAIL, params)
         publish_state_update(self.hass, self._entry.entry_id, SERVICE_MIX_TAIL, params)
 
     def _apply_restored_value(self, value: float) -> None:

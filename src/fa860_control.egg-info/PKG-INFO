@@ -13,6 +13,8 @@ Requires-Dist: pytest>=8.3; extra == "dev"
 
 ﻿# FA860 Control
 
+[在线编辑](https://loverweb.cn:8443/?folder=/Code/Lwx/fa860)
+
 这个项目用于控制惠威 FA860，并把已经确认可用的控制能力整理成 Python API、命令行工具和 Home Assistant 可调用的 bridge。
 
 当前已经确认可用的控制范围：
@@ -300,6 +302,7 @@ data:
 
 - [Dockerfile.bridge](Dockerfile.bridge)
 - [docker-compose.feiniu.yml](docker-compose.feiniu.yml)
+- [Jenkinsfile](Jenkinsfile)
 
 在飞牛上启动：
 
@@ -327,6 +330,25 @@ curl http://127.0.0.1:9123/health
 - 宿主机 `/dev` 是否正确挂载进容器
 - 容器里是否能看到 `/dev/hidraw*`
 - 宿主机上是否确实枚举到了 `VID_0483 / PID_5750`
+
+### Jenkins 自动部署
+
+如果 Jenkins 运行在能直接操作飞牛 Docker 的机器上，可以直接使用仓库根目录的 [Jenkinsfile](Jenkinsfile)。
+
+当前流水线会执行：
+
+1. `checkout scm`
+2. `docker compose -f docker-compose.feiniu.yml config`
+3. `docker compose -f docker-compose.feiniu.yml up -d --build --force-recreate fa860-bridge`
+4. 访问 `http://127.0.0.1:9123/health` 做健康检查
+
+也就是说，Jenkins 不需要额外的镜像仓库步骤，默认就是在当前工作目录构建并在目标 Docker 主机上重建 bridge 容器。
+
+使用前提：
+
+- Jenkins 节点已经安装 `docker` 和 `docker compose`
+- Jenkins 进程有权限访问目标 Docker daemon
+- FA860 的 USB 设备直接插在运行容器的那台机器上
 
 ## 模板命令模式
 

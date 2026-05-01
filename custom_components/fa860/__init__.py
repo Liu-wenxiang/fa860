@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 
 import asyncio
 import logging
 
+from aiohttp import ClientError
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
@@ -13,6 +15,7 @@ from homeassistant.const import CONF_HOST, CONF_PORT, CONF_TIMEOUT, EVENT_HOMEAS
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers import aiohttp_client, config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
@@ -31,9 +34,13 @@ SERVICE_MIX_TAIL = "mix_tail"
 
 DATA_CLIENTS = "clients"
 DATA_STATES = "states"
+DATA_AVAILABILITY = "availability"
+DATA_RETRY_UNSUBS = "retry_unsubs"
 DATA_UNSUB_STOP = "unsub_stop"
 DATA_YAML_CLIENT = "yaml_client"
 SIGNAL_STATE_UPDATED = f"{DOMAIN}_state_updated"
+SIGNAL_AVAILABILITY_UPDATED = f"{DOMAIN}_availability_updated"
+BRIDGE_RETRY_INTERVAL = timedelta(seconds=15)
 
 MIX_LINE_LABELS = ("LINE1", "LINE2", "LINE3", "LINE4", "LINE5", "LINE6", "LINE7", "LINE8")
 MIX_TAIL_LABELS = {
@@ -44,6 +51,10 @@ MIX_TAIL_LABELS = {
 }
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class Fa860BridgeConnectionError(HomeAssistantError):
+    """Raised when Home Assistant cannot reach the FA860 bridge."""
 
 
 @dataclass(slots=True)
@@ -138,20 +149,26 @@ class Fa860BridgeClient:
 
     async def async_check_health(self) -> None:
         session = aiohttp_client.async_get_clientsession(self.hass)
-        async with asyncio.timeout(self.timeout):
-            response = await session.get(f"{self.base_url}/health")
-            data = await response.json()
+        try:
+            async with asyncio.timeout(self.timeout):
+                response = await session.get(f"{self.base_url}/health")
+                data = await response.json()
+        except (ClientError, OSError, TimeoutError) as exc:
+            raise Fa860BridgeConnectionError("Failed to connect to the FA860 bridge") from exc
         if response.status != 200 or not data.get("ok"):
             raise HomeAssistantError("FA860 bridge health check failed")
 
     async def async_command(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
         session = aiohttp_client.async_get_clientsession(self.hass)
-        async with asyncio.timeout(self.timeout):
-            response = await session.post(
-                f"{self.base_url}/command",
-                json={"name": name, "params": params},
-            )
-            data = await response.json()
+        try:
+            async with asyncio.timeout(self.timeout):
+                response = await session.post(
+                    f"{self.base_url}/command",
+                    json={"name": name, "params": params},
+                )
+                data = await response.json()
+        except (ClientError, OSError, TimeoutError) as exc:
+            raise Fa860BridgeConnectionError("Failed to connect to the FA860 bridge") from exc
         if response.status >= 400 or not data.get("ok"):
             raise HomeAssistantError(data.get("error", f"FA860 bridge command failed: {response.status}"))
         return data
@@ -169,7 +186,15 @@ def _get_default_client(hass: HomeAssistant) -> Fa860BridgeClient:
 
 
 def _ensure_domain_data(hass: HomeAssistant) -> dict[str, Any]:
-    return hass.data.setdefault(DOMAIN, {DATA_CLIENTS: {}, DATA_STATES: {}})
+    return hass.data.setdefault(
+        DOMAIN,
+        {
+            DATA_CLIENTS: {},
+            DATA_STATES: {},
+            DATA_AVAILABILITY: {},
+            DATA_RETRY_UNSUBS: {},
+        },
+    )
 
 
 def _build_channel_states() -> dict[int, Fa860ChannelState]:
@@ -181,6 +206,72 @@ def _get_default_entry_id(hass: HomeAssistant) -> str | None:
     if states:
         return next(iter(states.keys()))
     return None
+
+
+def is_entry_available(hass: HomeAssistant, entry_id: str) -> bool:
+    return hass.data.get(DOMAIN, {}).get(DATA_AVAILABILITY, {}).get(entry_id, False)
+
+
+def _set_entry_available(hass: HomeAssistant, entry_id: str, available: bool) -> None:
+    domain_data = _ensure_domain_data(hass)
+    previous = domain_data[DATA_AVAILABILITY].get(entry_id)
+    domain_data[DATA_AVAILABILITY][entry_id] = available
+    if previous != available:
+        async_dispatcher_send(hass, SIGNAL_AVAILABILITY_UPDATED, entry_id)
+
+
+def _cancel_retry_poll(hass: HomeAssistant, entry_id: str) -> None:
+    unsub = _ensure_domain_data(hass)[DATA_RETRY_UNSUBS].pop(entry_id, None)
+    if unsub is not None:
+        unsub()
+
+
+def _schedule_retry_poll(hass: HomeAssistant, entry_id: str) -> None:
+    domain_data = _ensure_domain_data(hass)
+    if entry_id in domain_data[DATA_RETRY_UNSUBS]:
+        return
+
+    async def _async_retry(_: object) -> None:
+        client = get_entry_client(hass, entry_id)
+        try:
+            await client.async_check_health()
+        except HomeAssistantError:
+            return
+
+        _cancel_retry_poll(hass, entry_id)
+        _set_entry_available(hass, entry_id, True)
+        _LOGGER.info("FA860 bridge is reachable again: %s", client.base_url)
+
+    domain_data[DATA_RETRY_UNSUBS][entry_id] = async_track_time_interval(hass, _async_retry, BRIDGE_RETRY_INTERVAL)
+
+
+def _mark_entry_unavailable(hass: HomeAssistant, entry_id: str, reason: str) -> None:
+    client = get_entry_client(hass, entry_id)
+    if is_entry_available(hass, entry_id):
+        _LOGGER.warning("FA860 bridge became unavailable (%s): %s", reason, client.base_url)
+    _set_entry_available(hass, entry_id, False)
+    _schedule_retry_poll(hass, entry_id)
+
+
+async def async_execute_entry_command(hass: HomeAssistant, entry_id: str, name: str, params: dict[str, Any]) -> dict[str, Any]:
+    client = get_entry_client(hass, entry_id)
+    try:
+        result = await client.async_command(name, params)
+    except Fa860BridgeConnectionError as exc:
+        _mark_entry_unavailable(hass, entry_id, str(exc))
+        raise
+
+    _cancel_retry_poll(hass, entry_id)
+    _set_entry_available(hass, entry_id, True)
+    return result
+
+
+async def _async_execute_default_command(hass: HomeAssistant, name: str, params: dict[str, Any]) -> None:
+    entry_id = _get_default_entry_id(hass)
+    if entry_id is None:
+        await _get_default_client(hass).async_command(name, params)
+        return
+    await async_execute_entry_command(hass, entry_id, name, params)
 
 
 def get_entry_client(hass: HomeAssistant, entry_id: str) -> Fa860BridgeClient:
@@ -226,10 +317,9 @@ def publish_state_update(hass: HomeAssistant, entry_id: str, name: str, params: 
 
 
 async def async_send_channel_mute_command(hass: HomeAssistant, entry_id: str, channel: int, mute: bool) -> None:
-    client = get_entry_client(hass, entry_id)
     if mute:
         params = {"channel": channel, "mute": True}
-        await client.async_command(SERVICE_MUTE, params)
+        await async_execute_entry_command(hass, entry_id, SERVICE_MUTE, params)
         publish_state_update(hass, entry_id, SERVICE_MUTE, params)
         return
 
@@ -239,7 +329,7 @@ async def async_send_channel_mute_command(hass: HomeAssistant, entry_id: str, ch
         "db": state.volume_db,
         "mute": False,
     }
-    await client.async_command(SERVICE_VOLUME, params)
+    await async_execute_entry_command(hass, entry_id, SERVICE_VOLUME, params)
     publish_state_update(hass, entry_id, SERVICE_VOLUME, params)
 
 
@@ -261,28 +351,28 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _handle_source(call: ServiceCall) -> None:
         params = dict(call.data)
-        await _get_default_client(hass).async_command(SERVICE_SOURCE, params)
+        await _async_execute_default_command(hass, SERVICE_SOURCE, params)
         entry_id = _get_default_entry_id(hass)
         if entry_id is not None:
             publish_state_update(hass, entry_id, SERVICE_SOURCE, params)
 
     async def _handle_volume(call: ServiceCall) -> None:
         params = dict(call.data)
-        await _get_default_client(hass).async_command(SERVICE_VOLUME, params)
+        await _async_execute_default_command(hass, SERVICE_VOLUME, params)
         entry_id = _get_default_entry_id(hass)
         if entry_id is not None:
             publish_state_update(hass, entry_id, SERVICE_VOLUME, params)
 
     async def _handle_mix_line(call: ServiceCall) -> None:
         params = dict(call.data)
-        await _get_default_client(hass).async_command(SERVICE_MIX_LINE, params)
+        await _async_execute_default_command(hass, SERVICE_MIX_LINE, params)
         entry_id = _get_default_entry_id(hass)
         if entry_id is not None:
             publish_state_update(hass, entry_id, SERVICE_MIX_LINE, params)
 
     async def _handle_mix_tail(call: ServiceCall) -> None:
         params = dict(call.data)
-        await _get_default_client(hass).async_command(SERVICE_MIX_TAIL, params)
+        await _async_execute_default_command(hass, SERVICE_MIX_TAIL, params)
         entry_id = _get_default_entry_id(hass)
         if entry_id is not None:
             publish_state_update(hass, entry_id, SERVICE_MIX_TAIL, params)
@@ -341,9 +431,22 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data = _ensure_domain_data(hass)
     client = _build_client(hass, entry.data)
-    await client.async_check_health()
     domain_data[DATA_CLIENTS][entry.entry_id] = client
     domain_data[DATA_STATES].setdefault(entry.entry_id, _build_channel_states())
+    domain_data[DATA_AVAILABILITY][entry.entry_id] = False
+
+    try:
+        await client.async_check_health()
+    except HomeAssistantError as exc:
+        _LOGGER.warning(
+            "FA860 bridge is unavailable during setup, retrying every %s seconds: %s",
+            int(BRIDGE_RETRY_INTERVAL.total_seconds()),
+            exc,
+        )
+        _mark_entry_unavailable(hass, entry.entry_id, str(exc))
+    else:
+        _set_entry_available(hass, entry.entry_id, True)
+
     _async_register_services(hass)
     _ensure_stop_listener(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -354,8 +457,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data = _ensure_domain_data(hass)
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
+        _cancel_retry_poll(hass, entry.entry_id)
         domain_data[DATA_CLIENTS].pop(entry.entry_id, None)
         domain_data[DATA_STATES].pop(entry.entry_id, None)
+        domain_data[DATA_AVAILABILITY].pop(entry.entry_id, None)
         if not domain_data[DATA_CLIENTS] and DATA_YAML_CLIENT not in domain_data:
             _async_unregister_services(hass)
     return unload_ok
