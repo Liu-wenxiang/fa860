@@ -1,4 +1,4 @@
-﻿# FA860 Control
+﻿# FA860 Control Beta
 
 [在线编辑](https://loverweb.cn:8443/?folder=/Code/Lwx/fa860)
 
