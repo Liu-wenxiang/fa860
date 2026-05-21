@@ -10,7 +10,7 @@ pipeline {
   environment {
     COMPOSE_FILE = "docker-compose.feiniu.yml"
     SERVICE_NAME = "fa860-bridge"
-    HEALTH_URL = "http://loverweb.cn:9123/health"
+    HEALTH_URL = "http://10.0.0.30:9123/health"
   }
 
   stages {
