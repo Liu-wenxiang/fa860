@@ -355,6 +355,18 @@ curl http://127.0.0.1:9123/health
 - Jenkins 进程有权限访问目标 Docker daemon
 - FA860 的 USB 设备直接插在运行容器的那台机器上
 
+### GitLab CI 自动同步 GitHub
+
+如果你希望继续以 GitLab 为主仓库，但让 HACS 从 GitHub 获取更新，可以在 GitLab CI 中自动同步默认分支到 GitHub。
+
+当前仓库的 [.gitlab-ci.yml](.gitlab-ci.yml) 已包含 `sync_github` 任务，它会在默认分支测试通过后自动执行。
+
+需要在 GitLab 项目 CI/CD Variables 中配置：
+
+- `GITHUB_PUSH_URL`：GitHub 推送地址，建议使用带令牌的 HTTPS 地址，示例：`https://<token>@github.com/Liu-wenxiang/fa860.git`
+
+建议把这个变量设为受保护变量，并只允许默认分支触发同步。
+
 ## 模板命令模式
 
 如果你还需要保留一套十六进制模板命令，可以先复制 [examples/fa860.example.json](examples/fa860.example.json) 为你自己的配置文件，例如 `fa860.json`。

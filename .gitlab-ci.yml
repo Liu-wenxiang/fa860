@@ -5,6 +5,7 @@ default:
 
 stages:
   - test
+  - sync
 
 variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
@@ -15,8 +16,9 @@ cache:
     - .cache/pip
 
 before_script:
+  - sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g; s|http://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources
   - apt-get update
-  - apt-get install -y --no-install-recommends libhidapi-dev
+  - apt-get install -y --no-install-recommends git libhidapi-dev openssh-client
   - python -m pip install --upgrade pip
   - pip install -e .[dev]
 
@@ -24,3 +26,21 @@ test:
   stage: test
   script:
     - pytest
+
+sync_github:
+  stage: sync
+  needs:
+    - test
+  rules:
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $GITHUB_PUSH_URL"
+  before_script:
+    - sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g; s|http://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources
+    - apt-get update
+    - apt-get install -y --no-install-recommends git openssh-client
+  script:
+    - git config --global user.name "GitLab CI"
+    - git config --global user.email "gitlab-ci@local"
+    - git remote remove github-ci || true
+    - git remote add github-ci "$GITHUB_PUSH_URL"
+    - git push github-ci HEAD:$CI_COMMIT_BRANCH
+    - git push github-ci --tags
