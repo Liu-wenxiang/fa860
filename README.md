@@ -366,7 +366,18 @@ curl http://127.0.0.1:9123/health
 
 需要在 GitLab 项目 CI/CD Variables 中配置：
 
-- `GITHUB_PUSH_URL`：GitHub 推送地址，建议使用带令牌的 HTTPS 地址，示例：`https://<token>@github.com/Liu-wenxiang/fa860.git`
+- `CI_HTTP_PROXY`：可选，HTTP/HTTPS 代理地址；如果你的 GitLab Runner 访问 GitHub 不稳定，可以填写例如 `http://10.0.0.33:4780`
+
+- `GITHUB_PUSH_URL`：GitHub 推送地址，适用于 HTTPS 推送，示例：`https://<token>@github.com/Liu-wenxiang/fa860.git`
+
+如果 GitLab Runner 到 GitHub 的 HTTPS 连接不稳定，建议改用 SSH，并额外配置：
+
+- `GITHUB_SSH_PRIVATE_KEY`：用于推送 GitHub 的私钥，建议使用单独创建的 deploy key 或机器账号 key
+- `GITHUB_SSH_PUSH_URL`：GitHub SSH 推送地址，建议填写：`ssh://git@ssh.github.com:443/Liu-wenxiang/fa860.git`
+- `GITHUB_SSH_HOST`：可选，默认是 `ssh.github.com`
+- `GITHUB_SSH_PORT`：可选，默认是 `443`
+
+说明：`CI_HTTP_PROXY` 主要作用于 apt、pip 和 Git HTTPS 推送；如果你使用 `GITHUB_SSH_PUSH_URL` 走 SSH，同步链路默认不会自动通过这个 HTTP 代理。
 
 如果 GitLab Runner 不能直接使用内置仓库凭据回推 tag，可以额外配置：
 

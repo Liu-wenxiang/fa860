@@ -11,12 +11,20 @@ stages:
 variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  NO_PROXY: "127.0.0.1,localhost"
+  no_proxy: "127.0.0.1,localhost"
 
 cache:
   paths:
     - .cache/pip
 
 before_script:
+  - export http_proxy="$CI_HTTP_PROXY"
+  - export https_proxy="$CI_HTTP_PROXY"
+  - export HTTP_PROXY="$CI_HTTP_PROXY"
+  - export HTTPS_PROXY="$CI_HTTP_PROXY"
+  - export all_proxy="$CI_HTTP_PROXY"
+  - export ALL_PROXY="$CI_HTTP_PROXY"
   - sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g; s|http://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources
   - apt-get update
   - apt-get install -y --no-install-recommends git libhidapi-dev openssh-client
@@ -37,6 +45,11 @@ release_tag:
   script:
     - git config --global user.name "GitLab CI"
     - git config --global user.email "gitlab-ci@local"
+    - |
+      if [ -n "$CI_HTTP_PROXY" ]; then
+        git config --global http.proxy "$CI_HTTP_PROXY"
+        git config --global https.proxy "$CI_HTTP_PROXY"
+      fi
     - git remote remove origin-ci || true
     - git remote add origin-ci "${GITLAB_PUSH_URL:-$CI_REPOSITORY_URL}"
     - git fetch --tags origin-ci
@@ -55,15 +68,34 @@ sync_github:
   needs:
     - release_tag
   rules:
-    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $GITHUB_PUSH_URL"
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ($GITHUB_PUSH_URL || $GITHUB_SSH_PUSH_URL)"
   before_script:
+    - export http_proxy="$CI_HTTP_PROXY"
+    - export https_proxy="$CI_HTTP_PROXY"
+    - export HTTP_PROXY="$CI_HTTP_PROXY"
+    - export HTTPS_PROXY="$CI_HTTP_PROXY"
+    - export all_proxy="$CI_HTTP_PROXY"
+    - export ALL_PROXY="$CI_HTTP_PROXY"
     - sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g; s|http://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources
     - apt-get update
     - apt-get install -y --no-install-recommends git openssh-client
   script:
     - git config --global user.name "GitLab CI"
     - git config --global user.email "gitlab-ci@local"
+    - |
+      if [ -n "$CI_HTTP_PROXY" ]; then
+        git config --global http.proxy "$CI_HTTP_PROXY"
+        git config --global https.proxy "$CI_HTTP_PROXY"
+      fi
+    - |
+      if [ -n "$GITHUB_SSH_PRIVATE_KEY" ]; then
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        printf '%s\n' "$GITHUB_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        ssh-keyscan -p "${GITHUB_SSH_PORT:-443}" "${GITHUB_SSH_HOST:-ssh.github.com}" >> ~/.ssh/known_hosts
+      fi
     - git remote remove github-ci || true
-    - git remote add github-ci "$GITHUB_PUSH_URL"
+    - git remote add github-ci "${GITHUB_SSH_PUSH_URL:-$GITHUB_PUSH_URL}"
     - git push github-ci HEAD:$CI_COMMIT_BRANCH
     - git push github-ci --tags
