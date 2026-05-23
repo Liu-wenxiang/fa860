@@ -5,6 +5,7 @@ default:
 
 stages:
   - test
+  - release
   - sync
 
 variables:
@@ -27,10 +28,32 @@ test:
   script:
     - pytest
 
+release_tag:
+  stage: release
+  needs:
+    - test
+  rules:
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+  script:
+    - git config --global user.name "GitLab CI"
+    - git config --global user.email "gitlab-ci@local"
+    - git remote remove origin-ci || true
+    - git remote add origin-ci "${GITLAB_PUSH_URL:-$CI_REPOSITORY_URL}"
+    - git fetch --tags origin-ci
+    - VERSION=$(python -c "import json, pathlib; print(json.loads(pathlib.Path('custom_components/fa860/manifest.json').read_text(encoding='utf-8'))['version'])")
+    - TAG="v$VERSION"
+    - |
+      if git rev-parse "$TAG" >/dev/null 2>&1; then
+        echo "Tag $TAG already exists, skipping"
+        exit 0
+      fi
+    - git tag -a "$TAG" "$CI_COMMIT_SHA" -m "Release $TAG"
+    - git push origin-ci "$TAG"
+
 sync_github:
   stage: sync
   needs:
-    - test
+    - release_tag
   rules:
     - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $GITHUB_PUSH_URL"
   before_script:

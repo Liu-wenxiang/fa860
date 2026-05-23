@@ -359,11 +359,18 @@ curl http://127.0.0.1:9123/health
 
 如果你希望继续以 GitLab 为主仓库，但让 HACS 从 GitHub 获取更新，可以在 GitLab CI 中自动同步默认分支到 GitHub。
 
-当前仓库的 [.gitlab-ci.yml](.gitlab-ci.yml) 已包含 `sync_github` 任务，它会在默认分支测试通过后自动执行。
+当前仓库的 [.gitlab-ci.yml](.gitlab-ci.yml) 已包含两个发布相关任务：
+
+- `release_tag`：默认分支测试通过后，读取 [custom_components/fa860/manifest.json](custom_components/fa860/manifest.json) 里的 `version`，自动创建 `v版本号` tag；如果 tag 已存在则跳过
+- `sync_github`：在 tag 处理完成后，把默认分支和 tags 同步到 GitHub
 
 需要在 GitLab 项目 CI/CD Variables 中配置：
 
 - `GITHUB_PUSH_URL`：GitHub 推送地址，建议使用带令牌的 HTTPS 地址，示例：`https://<token>@github.com/Liu-wenxiang/fa860.git`
+
+如果 GitLab Runner 不能直接使用内置仓库凭据回推 tag，可以额外配置：
+
+- `GITLAB_PUSH_URL`：GitLab 推送地址，示例：`https://oauth2:<token>@loverweb.cn:91/home/fa860.git`
 
 建议把这个变量设为受保护变量，并只允许默认分支触发同步。
 
