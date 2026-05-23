@@ -204,6 +204,23 @@ curl http://127.0.0.1:9123/health
 
 ### 安装 HA 自定义集成
 
+如果你想通过 HACS 安装，而不是手动复制目录，需要先把当前仓库镜像到公开 GitHub 仓库。
+HACS 自定义仓库只支持公开 GitHub 仓库地址，当前这个自建 Git 远端不能直接添加到 HACS。
+
+HACS 自定义仓库安装步骤：
+
+1. 把当前仓库推送到公开 GitHub
+2. 在 Home Assistant 中打开 HACS
+3. 进入“右上角菜单 -> 自定义仓库”
+4. 仓库地址填写 GitHub 仓库地址，类型选择 `Integration`
+5. 添加后搜索 `FA860 Bridge` 并安装
+6. 重启 Home Assistant
+7. 进入“设置 -> 设备与服务 -> 添加集成”
+8. 搜索 `FA860 Bridge`
+9. 在配置界面里填写 bridge 的 `host`、`port`、`timeout` 和是否启用 `SSL`
+
+如果你暂时还没有公开 GitHub 仓库，仍然可以先按下面的手动方式安装。
+
 1. 把 [custom_components/fa860](custom_components/fa860) 整个目录复制到 HA 配置目录下的 `custom_components/fa860`
 2. 重启 Home Assistant
 3. 进入“设置 -> 设备与服务 -> 添加集成”
